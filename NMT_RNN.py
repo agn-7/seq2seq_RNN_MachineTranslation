@@ -235,11 +235,6 @@ class PrepareData:
         for pair in sents:
             training_pairs.append(self.tensorsFromPair(pair, input_lang_prop, target_lang_prob))
 
-        english, word2idx_input = self.tokenization(sents[:, 0])
-        englich_vocab_size = len(english.word_index) + 1
-
-        deu, word2idx_output = self.tokenization(sents[:, 1])
-        deu_vocab_size = len(deu.word_index) + 1
         return self
 
 
