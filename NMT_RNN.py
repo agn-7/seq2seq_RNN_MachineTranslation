@@ -1,27 +1,22 @@
-import gzip
 import io
 import pickle
 import re
-
 import unicodedata
-from keras.layers import Embedding
-from keras.preprocessing.text import Tokenizer
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.preprocessing import LabelEncoder
-from sklearn.compose import ColumnTransformer
 from keras.preprocessing.sequence import pad_sequences
-from keras.utils import to_categorical
 import numpy as np
-import pandas as pd
-from operator import mul
 
-SOS_token = 0
-EOS_token = 1
+SOS_TOKEN = 0
+EOS_TOKEN = 1
 
 
-class RNN:
-    def __init__(self, encoder_x_dim, decoder_x_dim, h_dim, epoch, learning_rate):
+class EncoderDecoderRNN:
+    def __init__(self, input_size, target_size, encoder_x_dim, decoder_x_dim, h_dim, epoch, learning_rate):
+        super(EncoderDecoderRNN, self).__init__()
+        self.input_size = input_size
+        self.target_size = target_size
         self.encoder_x_dim = encoder_x_dim
         self.decoder_x_dim = decoder_x_dim
         self.h_dim = h_dim
@@ -43,10 +38,9 @@ class RNN:
     def softmax(self, x, derivative=False):
         x_safe = x + 1e-12
         f = np.exp(x_safe) / np.sum(np.exp(x_safe))
-
-        if derivative:  # Return the derivative of the function evaluated at x
-            pass  # We will not need this one
-        else:  # Return the forward pass of the function at x
+        if derivative:
+            pass
+        else:
             return f
         return self
 
@@ -74,10 +68,7 @@ class RNN:
     def backward(self):
         return self
 
-    def train(self, train_x, train_y, encoder_embedding_matrix, decoder_embedding_matrix):
-        train_x = make_list(train_x)
-        train_y = make_list(train_y)
-
+    def train(self, training_pair, encoder_embedding_matrix, decoder_embedding_matrix):
         encoder_outputs, hidden_states = self.encoder_forward(train_x,
                                                               encoder_embedding_matrix)
         decoder_output = self.decoder_forward(train_y, hidden_states[-1],
@@ -111,7 +102,8 @@ class VocabularyProperties:
             self.word2Count[word] += 1
 
 
-def read_embeddings(self, MAX_NUM_WORDS, word2idx_inputs, word2idx_output, EMBEDDING_SIZE, network_type):
+def read_embeddings(MAX_NUM_WORDS, input_words_count, word2idx_inputs, output_words_count, word2idx_output,
+                    EMBEDDING_SIZE, network_type):
     # embeding_dict = {}
     # glove_file = open('E:\\projects\\Source Code Summarization\\NMT_data\\glove.6B.100d.txt')
     # for line in glove_file:
@@ -126,20 +118,16 @@ def read_embeddings(self, MAX_NUM_WORDS, word2idx_inputs, word2idx_output, EMBED
     if network_type == 'encoder':
         with open('NMT_data\\encoder_embedding_dict.pickle', 'rb') as handle:
             embedding_dict = pickle.load(handle)
-            widx = word2idx_inputs
 
-        num_words = min(MAX_NUM_WORDS, len(widx) + 1)
-        embedding_matrix = np.zeros((len(widx) + 1, 100))
-        for word, index in widx.items():
+        embedding_matrix = np.zeros((input_words_count, EMBEDDING_SIZE))
+        for word, index in word2idx_inputs.items():
             embedding_vector = embedding_dict.get(word)
             if embedding_vector is not None:
                 embedding_matrix[index] = embedding_vector
         return embedding_matrix
-
     else:
         fname = 'NMT_data\\decoder_embedding_dict.txt'
-        widx = word2idx_output
-        embedding_matrix = np.zeros((len(widx) + 1, 100))
+        embedding_matrix = np.zeros((output_words_count, EMBEDDING_SIZE))
         fin = io.open(fname, 'r', encoding='utf-8', newline='\n', errors='ignore')
         n, d = map(int, fin.readline().split())
         data = {}
@@ -147,25 +135,23 @@ def read_embeddings(self, MAX_NUM_WORDS, word2idx_inputs, word2idx_output, EMBED
             tokens = line.rstrip().split(' ')
             data[tokens[0]] = tokens[1:]
 
-        for word, idx in widx.items():
+        for word, idx in word2idx_output.items():
             myvec = data[word]
             if myvec is not None:
                 embedding_matrix[idx] = myvec
         return embedding_matrix
 
 
-def encode_sequences(tokenizer, length, lines, encoding_type):
-    # integer encode sequences
-    seq = tokenizer.texts_to_sequences(lines)
-    # pad sequences with 0 values
-    seq = pad_sequences(seq, maxlen=length, padding=encoding_type)
-    return seq
+def encode_sequences(input_pair, input_lang_prop, target_lang_prop, max_padd_length):
+    seq1 = pad_sequences([input_pair[0]], maxlen=max(max_padd_length[0]), padding='pre')
+    seq2 = pad_sequences([input_pair[1]], maxlen=max(max_padd_length[1]), padding='pre')
+    return (seq1, seq2)
 
 
 class PrepareData:
     def __init__(self, data_address, english_to_deutch):
         self.data_address = data_address
-        self.english_to_french = english_to_deutch
+        self.english_to_deutch = english_to_deutch
 
     def read_data(self):
         # open the file
@@ -193,26 +179,12 @@ class PrepareData:
         sents = [[self.normalizeString(token) for token in item.split('  ')] for item in sents]
         return sents
 
-    def tokenization(self, lines):
-        tokenizer = Tokenizer()
-        tokenizer.fit_on_texts(lines)
-        return tokenizer, tokenizer.word_index
-
-    def make_list(self, token_matrix):
-        data = []
-        for i in range(len(token_matrix)):
-            rec = np.zeros((np.size(token_matrix, 1), 1))
-            for j in range(len(token_matrix[i, :])):
-                rec[j, 0] = token_matrix[i, j]
-            data.append(rec)
-        return data
-
     def indexesFromSentence(self, lang, sentence):
         return [lang.word2idx[word] for word in sentence.split(' ')]
 
     def tensorFromSentence(self, lang, sentence):
         indexes = self.indexesFromSentence(lang, sentence)
-        indexes.append(EOS_token)
+        indexes.append(EOS_TOKEN)
         return indexes
 
     def tensorsFromPair(self, pair, input_lang_prop, target_lang_prob):
@@ -222,6 +194,9 @@ class PrepareData:
 
     def prepare_data(self):
         training_pairs = []
+        padded_training_pairs = []
+        max_padd_length = [[], []]
+
         input_data = self.read_data()
         sents = self.iterate_data_lines(input_data)
 
@@ -232,44 +207,53 @@ class PrepareData:
             input_lang_prop.addSentence(item[0])
             target_lang_prob.addSentence(item[1])
 
-        for pair in sents:
-            training_pairs.append(self.tensorsFromPair(pair, input_lang_prop, target_lang_prob))
+        [training_pairs.append(self.tensorsFromPair(pair, input_lang_prop, target_lang_prob)) for pair in sents]
 
-        return self
+        for item in training_pairs:
+            max_padd_length[0].append(len(item[0]))
+            max_padd_length[1].append(len(item[1]))
+
+        [padded_training_pairs.append(encode_sequences(pair, input_lang_prop, target_lang_prob, max_padd_length)) for
+         pair in
+         training_pairs]
+
+        return padded_training_pairs, input_lang_prop, target_lang_prob
 
 
 def main():
     data_address = "NMT_data\\test_data.txt"
     english_to_deutch = True
     data_obj = PrepareData(data_address, english_to_deutch)
-    text = data_obj.prepare_data()
+    training_pairs, input_lang_prop, target_lang_prop = data_obj.prepare_data()
 
-    train, test = train_test_split(sents, test_size=0.2, random_state=12)
+    train, test = train_test_split(training_pairs, test_size=0.2, random_state=12)
 
-    encoder_input_data = encode_sequences(english, englich_vocab_size, train[:, 0], encoding_type='pre')
-    decoder_input_data = encode_sequences(deu, deu_vocab_size, train[:, 1], encoding_type='post')
-    decoder_test_data = encode_sequences(english, englich_vocab_size, test[:, 0], encoding_type='post')
-    actual_test_data = encode_sequences(deu, deu_vocab_size, test[:, 1], encoding_type='post')
+    encoder_x_dim = train[0][0].shape[1]
+    decoder_x_dim = train[0][1].shape[1]
 
-    encoder_x_dim = encoder_input_data.shape[1]
-    decoder_x_dim = decoder_input_data.shape[1]
     h_dim = 100
     epoch = 10
     learning_rate = 0.0000009
 
-    rnn = RNN(encoder_x_dim, decoder_x_dim, h_dim, epoch, learning_rate)
+    encoder_embedding_matrix = read_embeddings(len(training_pairs), input_lang_prop.n_words, input_lang_prop.word2idx,
+                                               target_lang_prop.n_words,
+                                               target_lang_prop.word2idx, h_dim,
+                                               network_type='encoder')
+    decoder_embedding_matrix = read_embeddings(len(training_pairs), input_lang_prop.n_words, input_lang_prop.word2idx,
+                                               target_lang_prop.n_words, target_lang_prop.word2idx,
+                                               h_dim,
+                                               network_type='decoder')
 
-    # encoder_embedding_matrix = rnn.read_embeddings(len(sents), word2idx_input, word2idx_output, h_dim,
-    #                                                network_type='encoder')
-    # decoder_embedding_matrix = rnn.read_embeddings(len(sents), word2idx_input, word2idx_output, h_dim,
-    #                                                network_type='decoder')
+    rnn = EncoderDecoderRNN(input_lang_prop.n_words, target_lang_prop.n_words, encoder_x_dim, decoder_x_dim, h_dim,
+                            epoch, learning_rate)
 
-    with open('NMT_data\\encoder_embedding_matrix.pickle', 'rb') as handle:
-        encoder_embedding_matrix = pickle.load(handle)
-
-    with open('NMT_data\\decoder_embedding_matrix.pickle', 'rb') as handle:
-        decoder_embedding_matrix = pickle.load(handle)
-    rnn.train(encoder_input_data, decoder_input_data, encoder_embedding_matrix, decoder_embedding_matrix)
+    #
+    # with open('NMT_data\\encoder_embedding_matrix.pickle', 'rb') as handle:
+    #     encoder_embedding_matrix = pickle.load(handle)
+    #
+    # with open('NMT_data\\decoder_embedding_matrix.pickle', 'rb') as handle:
+    #     decoder_embedding_matrix = pickle.load(handle)
+    # rnn.train(training_pairs, encoder_embedding_matrix, decoder_embedding_matrix)
 
 
 if __name__ == '__main__':
