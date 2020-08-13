@@ -1,0 +1,8 @@
+.idea
+/NMT_data/
+/text_data/
+main.py
+net.py
+rnn.py
+simple_vanilla_network.py
+tracj.py
